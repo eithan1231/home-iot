@@ -1,22 +1,20 @@
 import { createServer } from "node:net";
-import { humidityGauge, pressureGauge, temperatureGauge } from "./exporter.js";
+import {
+  setHumidityGauge,
+  setPressureGauge,
+  setTemperatureGauge,
+} from "./exporter.js";
 
 const handleTemperature = (identifier: string, value: string) => {
-  console.log("handleTemperature", identifier, value);
-
-  temperatureGauge.labels({ identifier }).set(Number(value));
+  setTemperatureGauge(identifier, Number(value));
 };
 
 const handlePressure = (identifier: string, value: string) => {
-  console.log("handlePressure", identifier, value);
-
-  pressureGauge.labels({ identifier }).set(Number(value));
+  setPressureGauge(identifier, Number(value));
 };
 
 const handleHumidity = (identifier: string, value: string) => {
-  console.log("handleHumidity", identifier, value);
-
-  humidityGauge.labels({ identifier }).set(Number(value));
+  setHumidityGauge(identifier, Number(value));
 };
 
 export const createIotServer = () => {
