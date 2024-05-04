@@ -22,11 +22,20 @@ void setup() {
   Serial.begin(9600);
   Serial.println(F("BME280 Initialised"));
 
-  bool status = bme.begin(0x76);
-  if (!status) {
+  if (!bme.begin(0x76)) {
     Serial.println("Could not find a valid BME280 sensor, check wiring!");
     while (1);
   }
+
+  // Self heat temperature fix:
+  // https://www.lpomykal.cz/bme280-temperature-measurement/
+  bme.setSampling(
+    Adafruit_BME280::MODE_FORCED,
+    Adafruit_BME280::SAMPLING_X1,
+    Adafruit_BME280::SAMPLING_X1,
+    Adafruit_BME280::SAMPLING_X1,
+    Adafruit_BME280::FILTER_OFF
+  );
 
   WiFi.begin(ssid, ssid_password);
   WiFi.setAutoReconnect(true);
@@ -58,63 +67,66 @@ void loop() {
 
   Serial.println("Connected to socket, proceeding.");
 
+  bme.takeForcedMeasurement();
+
+  Serial.println("Forced BME temperature.");
+
   sendTemperaure();
 
   sendHumidity();
 
   sendPressure();
 
-  delay(1000);
+  delay(60000);
 }
 
 void sendIdentifier() {
-  Serial.print("sendIdentifier.");
-  Serial.println(identifier);
-
   String payload = "hi:";
 
   payload += String(identifier);
 
   payload += ";";
 
+  Serial.println(payload);
+
   wifiClient.write(payload.c_str());
   wifiClient.flush();
 }
 
 void sendTemperaure() {
-  Serial.println("sendTemperaure.");
-
   String payload = "temperature:";
 
   payload += String(bme.readTemperature());
 
   payload += ";";
 
+  Serial.println(payload);
+
   wifiClient.write(payload.c_str());
   wifiClient.flush();
 }
 
 void sendHumidity() {
-  Serial.println("sendHumidity.");
-
   String payload = "humidity:";
 
   payload += String(bme.readHumidity());
 
   payload += ";";
 
+  Serial.println(payload);
+
   wifiClient.write(payload.c_str());
   wifiClient.flush();
 }
 
 void sendPressure() {
-  Serial.println("sendPressure.");
-
   String payload = "pressure:";
 
   payload += String((bme.readPressure() / 100.00F));
 
   payload += ";";
+
+  Serial.println(payload);
 
   wifiClient.write(payload.c_str());
   wifiClient.flush();
