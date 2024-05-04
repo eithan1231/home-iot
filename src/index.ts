@@ -1,12 +1,15 @@
-import { cleanupGauges, createExporterServer } from "./exporter.js";
+import { createExporterServer } from "./exporter.js";
 import { createIotServer } from "./iot.js";
 
+// Duration sockets will be kept alive before timing out.
+const iotServerTimeout = 30000;
+
 const main = async () => {
-  createIotServer();
+  createIotServer({
+    timeout: iotServerTimeout,
+  });
 
   createExporterServer();
-
-  setInterval(cleanupGauges, 1000);
 };
 
 main();

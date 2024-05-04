@@ -4,6 +4,7 @@ import {
   setPressureGauge,
   setTemperatureGauge,
 } from "./exporter.js";
+import { getUnixTimestamp } from "./util.js";
 
 const handleTemperature = (identifier: string, value: string) => {
   setTemperatureGauge(identifier, Number(value));
@@ -17,20 +18,52 @@ const handleHumidity = (identifier: string, value: string) => {
   setHumidityGauge(identifier, Number(value));
 };
 
-export const createIotServer = () => {
+const handleEnd = (identifier: string) => {
+  setTemperatureGauge(identifier, null);
+  setPressureGauge(identifier, null);
+  setHumidityGauge(identifier, null);
+};
+
+export const createIotServer = (opts: { timeout: number }) => {
   console.log("createIotServer");
 
-  const server = createServer();
+  const server = createServer({
+    noDelay: true,
+    allowHalfOpen: false,
+  });
 
   server.on("connection", (socket) => {
+    socket.setTimeout(opts.timeout);
+
     console.log(`New connection from ${socket.remoteAddress}`);
 
-    let identifier = "";
-    let initialised = false;
-    let blocked = false;
+    const sessionMetadata: {
+      initialised: boolean;
+      identifier: string;
+      blocked: boolean;
+      lastSeen: number;
+    } = {
+      initialised: false,
+      identifier: "",
+      blocked: false,
+      lastSeen: getUnixTimestamp(),
+    };
+
+    const socketEndCallback = () => {
+      console.log("ended connection", sessionMetadata.identifier);
+
+      if (sessionMetadata.initialised) {
+        handleEnd(sessionMetadata.identifier);
+      }
+    };
+
+    const gracefulEnd = () => {
+      socket.end(socketEndCallback);
+      sessionMetadata.blocked = true;
+    };
 
     const handleEvent = (action: string, value: string) => {
-      if (blocked) {
+      if (sessionMetadata.blocked) {
         console.log("Event to blocked connection", action, value);
 
         return;
@@ -40,38 +73,35 @@ export const createIotServer = () => {
         console.log("action 'hi'", action, value);
 
         // action `hi` is a initial event only
-        if (identifier) {
-          console.log("action hi has already been sent on socket");
+        if (sessionMetadata.initialised) {
+          console.log("Session has already been initialised");
 
-          socket.end();
-          blocked = true;
+          gracefulEnd();
           return;
         }
 
-        initialised = true;
-
-        identifier = value;
+        sessionMetadata.initialised = true;
+        sessionMetadata.identifier = value;
       }
 
-      if (!initialised) {
+      if (!sessionMetadata.initialised) {
         console.log("received event prematurely");
 
         // Premature payload
-        socket.end();
-        blocked = true;
+        gracefulEnd();
         return;
       }
 
       if (action === "temperature") {
-        handleTemperature(identifier, value);
+        handleTemperature(sessionMetadata.identifier, value);
       }
 
       if (action === "pressure") {
-        handlePressure(identifier, value);
+        handlePressure(sessionMetadata.identifier, value);
       }
 
       if (action === "humidity") {
-        handleHumidity(identifier, value);
+        handleHumidity(sessionMetadata.identifier, value);
       }
     };
 
@@ -97,16 +127,20 @@ export const createIotServer = () => {
       handleEvent(action, value);
     });
 
-    socket.on("close", () => {
-      console.log("closed connection", identifier);
+    socket.on("timeout", () => {
+      console.log("timeout connection", sessionMetadata.identifier);
+
+      gracefulEnd();
     });
 
-    socket.on("end", () => {
-      console.log("ended connection", identifier);
+    socket.on("close", () => {
+      console.log("closed connection", sessionMetadata.identifier);
     });
+
+    socket.on("end", socketEndCallback);
 
     socket.on("error", (err) => {
-      console.error(identifier, err);
+      console.error(sessionMetadata.identifier, err);
     });
   });
 

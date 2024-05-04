@@ -3,20 +3,23 @@ import express from "express";
 import { register, Gauge } from "prom-client";
 import { getUnixTimestamp } from "./util.js";
 
-let temperatureGaugeLastSeen: number = 0;
-
 const temperatureGauge = new Gauge({
   name: "iot_air_temperature",
   help: "Gauge for air temperature",
   labelNames: ["identifier"],
 });
 
-export const setTemperatureGauge = (identifier: string, value: number) => {
-  temperatureGaugeLastSeen = getUnixTimestamp();
+export const setTemperatureGauge = (
+  identifier: string,
+  value: number | null
+) => {
+  if (value === null) {
+    temperatureGauge.remove({ identifier });
+    return;
+  }
+
   temperatureGauge.labels({ identifier }).set(value);
 };
-
-let humidityGaugeLastSeen: number = 0;
 
 const humidityGauge = new Gauge({
   name: "iot_air_humidity",
@@ -24,12 +27,14 @@ const humidityGauge = new Gauge({
   labelNames: ["identifier"],
 });
 
-export const setHumidityGauge = (identifier: string, value: number) => {
-  humidityGaugeLastSeen = getUnixTimestamp();
+export const setHumidityGauge = (identifier: string, value: number | null) => {
+  if (value === null) {
+    humidityGauge.remove({ identifier });
+    return;
+  }
+
   humidityGauge.labels({ identifier }).set(value);
 };
-
-let pressureGaugeLastSeen: number = 0;
 
 const pressureGauge = new Gauge({
   name: "iot_air_pressure",
@@ -37,46 +42,13 @@ const pressureGauge = new Gauge({
   labelNames: ["identifier"],
 });
 
-export const setPressureGauge = (identifier: string, value: number) => {
-  pressureGaugeLastSeen = getUnixTimestamp();
+export const setPressureGauge = (identifier: string, value: number | null) => {
+  if (value === null) {
+    pressureGauge.remove({ identifier });
+    return;
+  }
+
   pressureGauge.labels({ identifier }).set(value);
-};
-
-export const cleanupGauges = () => {
-  const timeout = 60;
-
-  if (
-    temperatureGaugeLastSeen &&
-    temperatureGaugeLastSeen < getUnixTimestamp() - timeout
-  ) {
-    console.log("timeout temperature, reset");
-
-    temperatureGauge.reset();
-
-    temperatureGaugeLastSeen = 0;
-  }
-
-  if (
-    humidityGaugeLastSeen &&
-    humidityGaugeLastSeen < getUnixTimestamp() - timeout
-  ) {
-    console.log("timeout humidity, reset");
-
-    humidityGauge.reset();
-
-    humidityGaugeLastSeen = 0;
-  }
-
-  if (
-    pressureGaugeLastSeen &&
-    pressureGaugeLastSeen < getUnixTimestamp() - timeout
-  ) {
-    console.log("timeout pressure, reset");
-
-    pressureGauge.reset();
-
-    pressureGaugeLastSeen = 0;
-  }
 };
 
 export const createExporterServer = () => {
