@@ -1,150 +1,187 @@
-import { createServer } from "node:net";
-import {
-  setHumidityGauge,
-  setPressureGauge,
-  setTemperatureGauge,
-} from "./exporter.js";
-import { getUnixTimestamp } from "./util.js";
+import { Server, Socket, createServer } from "node:net";
+import EventEmitter from "node:events";
+import { randomUUID } from "node:crypto";
 
-const handleTemperature = (identifier: string, value: string) => {
-  setTemperatureGauge(identifier, Number(value));
+export const IOT_STANDARD_ACTION_HI = "hi";
+export const IOT_STANDARD_ACTION_PING = "ping";
+
+export type IotOptions = {
+  timeout: number;
 };
 
-const handlePressure = (identifier: string, value: string) => {
-  setPressureGauge(identifier, Number(value));
-};
+export class IotSession {
+  public initialised = false;
 
-const handleHumidity = (identifier: string, value: string) => {
-  setHumidityGauge(identifier, Number(value));
-};
+  public identifier?: string;
 
-const handleEnd = (identifier: string) => {
-  setTemperatureGauge(identifier, null);
-  setPressureGauge(identifier, null);
-  setHumidityGauge(identifier, null);
-};
+  public terminating = false;
 
-export const createIotServer = (opts: { timeout: number }) => {
-  console.log("createIotServer");
+  public socket: Socket;
 
-  const server = createServer({
-    noDelay: true,
-    allowHalfOpen: false,
-  });
+  public uuid: string;
 
-  server.on("connection", (socket) => {
-    socket.setTimeout(opts.timeout);
+  private options: IotOptions;
 
-    console.log(`New connection from ${socket.remoteAddress}`);
+  constructor(options: IotOptions, socket: Socket) {
+    this.options = options;
 
-    const sessionMetadata: {
-      initialised: boolean;
-      identifier: string;
-      blocked: boolean;
-      lastSeen: number;
-    } = {
-      initialised: false,
-      identifier: "",
-      blocked: false,
-      lastSeen: getUnixTimestamp(),
-    };
+    this.uuid = randomUUID();
 
-    const socketEndCallback = () => {
-      console.log("ended connection", sessionMetadata.identifier);
+    this.socket = socket;
+    this.socket.setTimeout(this.options.timeout);
+  }
 
-      if (sessionMetadata.initialised) {
-        handleEnd(sessionMetadata.identifier);
-      }
-    };
-
-    const gracefulEnd = () => {
-      socket.end(socketEndCallback);
-      sessionMetadata.blocked = true;
-    };
-
-    const handleEvent = (action: string, value: string) => {
-      if (sessionMetadata.blocked) {
-        console.log("Event to blocked connection", action, value);
-
-        return;
-      }
-
-      if (action === "hi") {
-        console.log("action 'hi'", action, value);
-
-        // action `hi` is a initial event only
-        if (sessionMetadata.initialised) {
-          console.log("Session has already been initialised");
-
-          gracefulEnd();
-          return;
+  send = (payload: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      this.socket.write(payload, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
         }
+      });
+    });
+  };
 
-        sessionMetadata.initialised = true;
-        sessionMetadata.identifier = value;
-      }
+  end = (): Promise<void> => {
+    return new Promise((resolve) => {
+      this.terminating = true;
 
-      if (!sessionMetadata.initialised) {
-        console.log("received event prematurely");
+      this.socket.end(() => {
+        resolve();
+      });
+    });
+  };
+}
 
-        // Premature payload
-        gracefulEnd();
-        return;
-      }
+export class IotServer extends EventEmitter<{
+  "session-start": [IotSession];
+  "session-event": [IotSession, string, string];
+  "session-end": [IotSession];
+}> {
+  private server: Server;
 
-      if (action === "temperature") {
-        handleTemperature(sessionMetadata.identifier, value);
-      }
+  private pool: Array<IotSession> = [];
 
-      if (action === "pressure") {
-        handlePressure(sessionMetadata.identifier, value);
-      }
+  private options: IotOptions;
 
-      if (action === "humidity") {
-        handleHumidity(sessionMetadata.identifier, value);
-      }
-    };
+  constructor(options: IotOptions) {
+    super();
 
-    socket.on("data", (data) => {
-      const raw = data.toString("utf-8");
-      const payload = /([a-z]{1,32})\:([a-zA-Z0-9._-]{1,128})\;/.exec(raw);
+    this.options = options;
 
-      if (!payload) {
-        console.log(`Failed to parse payload, ${raw}`);
-        return;
-      }
+    this.server = createServer({
+      noDelay: true,
+    });
 
-      const action = payload.at(1);
-      const value = payload.at(2);
+    this.server.on("connection", this.onServerConnection);
+  }
 
-      if (!action || !value) {
+  private onServerConnection = (socket: Socket) => {
+    const session = new IotSession(this.options, socket);
+
+    socket.on("data", (data) => this.onServerSocketData(session, data));
+    socket.on("timeout", () => this.onServerSocketTimeout(session));
+    socket.on("close", () => this.onServerSocketClose(session));
+    socket.on("end", () => this.onServerSocketEnd(session));
+    socket.on("error", (error) => this.onServerSocketError(session, error));
+
+    this.pool.push(session);
+
+    this.emit("session-start", session);
+  };
+
+  private onServerSocketData = (session: IotSession, data: Buffer) => {
+    if (session.terminating) {
+      console.log(
+        `[IotServer/onServerSocketData] ${session.identifier} Received data on terminating socket.`
+      );
+
+      return;
+    }
+
+    const raw = data.toString("utf-8");
+    const payload = /([a-z]{1,32})\:([a-zA-Z0-9._-]{1,512})\;/.exec(raw);
+
+    if (!payload) {
+      console.log(
+        `[IotServer/onServerSocketData] ${session.identifier} Failed to parse data ${raw}.`
+      );
+
+      return;
+    }
+
+    const action = payload.at(1);
+    const value = payload.at(2);
+
+    if (!action || !value) {
+      console.log(
+        `[IotServer/onServerSocketData] ${session.identifier} Failed parse payload action ${action}, value ${value}.`
+      );
+
+      return;
+    }
+
+    if (!session.initialised) {
+      if (action !== IOT_STANDARD_ACTION_HI) {
         console.log(
-          `Failed to parse payload, action ${action}, value ${value}`
+          `[IotServer/onServerSocketData] ${session.identifier} Received non-hi action on a non-initialised session. Terminating session.`
         );
+
+        session.end().then(() => this.onServerSocketEnd(session));
+
         return;
       }
 
-      handleEvent(action, value);
+      session.initialised = true;
+      session.identifier = value;
+    }
+
+    this.emit("session-event", session, action, value);
+  };
+
+  private onServerSocketTimeout = (session: IotSession) => {
+    console.error(`[IotServer/onServerSocketTimeout] ${session.identifier}`);
+    session.end().then(() => this.onServerSocketEnd(session));
+  };
+
+  private onServerSocketClose = (session: IotSession) => {
+    console.error(`[IotServer/onServerSocketClose] ${session.identifier}`);
+  };
+
+  private onServerSocketEnd = (session: IotSession) => {
+    console.error(`[IotServer/onServerSocketEnd] ${session.identifier}`);
+
+    if (session.initialised) {
+      this.emit("session-end", session);
+    }
+
+    this.deletePoolItem(session);
+  };
+
+  private onServerSocketError = (session: IotSession, err: Error) => {
+    console.error(`[IotServer/onServerSocketError] ${session.identifier}`, err);
+  };
+
+  private deletePoolItem = (session: IotSession) => {
+    const poolIndex = this.pool.findIndex(
+      (poolSession) => poolSession.uuid === session.uuid
+    );
+
+    if (poolIndex >= 0) {
+      this.pool.splice(poolIndex, 1);
+    }
+  };
+
+  public listen = (port: number) => {
+    console.log(`[IotServer/listen] Starting server listener on port ${port}.`);
+
+    this.server.listen(port, () => {
+      console.log(`[IotServer/listen] Listening on ${port}`);
     });
+  };
 
-    socket.on("timeout", () => {
-      console.log("timeout connection", sessionMetadata.identifier);
-
-      gracefulEnd();
-    });
-
-    socket.on("close", () => {
-      console.log("closed connection", sessionMetadata.identifier);
-    });
-
-    socket.on("end", socketEndCallback);
-
-    socket.on("error", (err) => {
-      console.error(sessionMetadata.identifier, err);
-    });
-  });
-
-  server.listen(3001, () => {
-    console.log("iot listening port 3001");
-  });
-};
+  public broadcast = async (payload: string): Promise<void> => {
+    await Promise.all(this.pool.map((session) => session.send(payload)));
+  };
+}

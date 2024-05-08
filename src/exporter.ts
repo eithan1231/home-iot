@@ -1,7 +1,6 @@
 import express from "express";
 
 import { register, Gauge } from "prom-client";
-import { getUnixTimestamp } from "./util.js";
 
 const temperatureGauge = new Gauge({
   name: "iot_air_temperature",
