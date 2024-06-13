@@ -210,7 +210,9 @@ export class IotServer extends EventEmitter<{
 
   public broadcast = async (action: string, payload: string): Promise<void> => {
     await Promise.all(
-      this.pool.map((session) => session.send(action, payload))
+      this.pool
+        .filter((session) => !session.socket.destroyed)
+        .map((session) => session.send(action, payload))
     );
   };
 
@@ -222,6 +224,7 @@ export class IotServer extends EventEmitter<{
     await Promise.all(
       this.pool
         .filter((session) => session.traits.includes(trait))
+        .filter((session) => !session.socket.destroyed)
         .map((session) => session.send(action, payload))
     );
   };
@@ -234,11 +237,16 @@ export class IotServer extends EventEmitter<{
     await Promise.all(
       this.pool
         .filter((session) => session.identifier === identifier)
+        .filter((session) => !session.socket.destroyed)
         .map((session) => session.send(action, payload))
     );
   };
 
   public broadcastRaw = async (payload: string): Promise<void> => {
-    await Promise.all(this.pool.map((session) => session.sendRaw(payload)));
+    await Promise.all(
+      this.pool
+        .filter((session) => !session.socket.destroyed)
+        .map((session) => session.sendRaw(payload))
+    );
   };
 }
