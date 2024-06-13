@@ -10,8 +10,7 @@ const char* ssid_password = "password";
 const char* server_ip = "192.168.1.1";
 const uint16_t server_port = 3001;
 
-const char* identifier = "test";
-
+const char* identifier = "homelab";
 
 #define SEALEVELPRESSURE_HPA (1013.25)
 

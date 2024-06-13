@@ -5,6 +5,7 @@ import {
   setTemperatureGauge,
 } from "./exporter.js";
 import { IotServer } from "./iot.js";
+import { registerPluginHomelab } from "./plugins/homelab.js";
 
 // Duration sockets will be kept alive before timing out.
 const iotServerTimeout = 1000 * 60 * 2;
@@ -12,10 +13,6 @@ const iotServerTimeout = 1000 * 60 * 2;
 const main = async () => {
   const iotServer = new IotServer({
     timeout: iotServerTimeout,
-  });
-
-  iotServer.on("session-start", (session) => {
-    //
   });
 
   iotServer.on("session-event", (session, action, value) => {
@@ -43,6 +40,10 @@ const main = async () => {
       setPressureGauge(session.identifier, null);
     }
   });
+
+  registerPluginHomelab(iotServer);
+
+  iotServer.listen(3001);
 
   createExporterServer();
 };

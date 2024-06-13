@@ -22,6 +22,8 @@ export class IotSession {
 
   private options: IotOptions;
 
+  public traits: Array<string> = [];
+
   constructor(options: IotOptions, socket: Socket) {
     this.options = options;
 
@@ -31,7 +33,13 @@ export class IotSession {
     this.socket.setTimeout(this.options.timeout);
   }
 
-  send = (payload: string): Promise<void> => {
+  send = async (action: string, payload: string): Promise<void> => {
+    console.log(`[IotSession/send] ${action}, payload: ${payload}`);
+
+    await this.sendRaw(`${action}:${payload};`);
+  };
+
+  sendRaw = (payload: string): Promise<void> => {
     return new Promise((resolve, reject) => {
       this.socket.write(payload, (err) => {
         if (err) {
@@ -75,6 +83,9 @@ export class IotServer extends EventEmitter<{
     });
 
     this.server.on("connection", this.onServerConnection);
+
+    // Default session-event handler
+    this.on("session-event", this.onSessionEventDefaultHandler);
   }
 
   private onServerConnection = (socket: Socket) => {
@@ -181,7 +192,53 @@ export class IotServer extends EventEmitter<{
     });
   };
 
-  public broadcast = async (payload: string): Promise<void> => {
-    await Promise.all(this.pool.map((session) => session.send(payload)));
+  private onSessionEventDefaultHandler = (
+    session: IotSession,
+    action: string,
+    value: string
+  ) => {
+    if (action === "trait") {
+      console.log(
+        `[IotServer/onSessionEventDefaultHandler] ${session.identifier} Received client trait "${value}", adding to session.`
+      );
+
+      if (!session.traits.includes(value)) {
+        session.traits.push(value);
+      }
+    }
+  };
+
+  public broadcast = async (action: string, payload: string): Promise<void> => {
+    await Promise.all(
+      this.pool.map((session) => session.send(action, payload))
+    );
+  };
+
+  public broadcastToTrait = async (
+    trait: string,
+    action: string,
+    payload: string
+  ): Promise<void> => {
+    await Promise.all(
+      this.pool
+        .filter((session) => session.traits.includes(trait))
+        .map((session) => session.send(action, payload))
+    );
+  };
+
+  public broadcastToIdentifier = async (
+    identifier: string,
+    action: string,
+    payload: string
+  ): Promise<void> => {
+    await Promise.all(
+      this.pool
+        .filter((session) => session.identifier === identifier)
+        .map((session) => session.send(action, payload))
+    );
+  };
+
+  public broadcastRaw = async (payload: string): Promise<void> => {
+    await Promise.all(this.pool.map((session) => session.sendRaw(payload)));
   };
 }

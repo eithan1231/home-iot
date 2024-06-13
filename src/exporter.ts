@@ -50,6 +50,24 @@ export const setPressureGauge = (identifier: string, value: number | null) => {
   pressureGauge.labels({ identifier }).set(value);
 };
 
+const labFanSpeedGauge = new Gauge({
+  name: "iot_lab_fan_speed",
+  help: "Gauge for lab fan speed",
+  labelNames: ["identifier"],
+});
+
+export const setLabFanSpeedGauge = (
+  identifier: string,
+  value: number | null
+) => {
+  if (value === null) {
+    labFanSpeedGauge.remove({ identifier });
+    return;
+  }
+
+  labFanSpeedGauge.labels({ identifier }).set(value);
+};
+
 export const createExporterServer = () => {
   console.log("createExporterServer");
 
