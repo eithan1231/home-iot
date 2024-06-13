@@ -50,7 +50,7 @@ export const registerPluginHomelab = (iotServer: IotServer) => {
       `${fanSpeed}`
     );
 
-    setLabFanSpeedGauge(IDENTIFIER_HOMELAB, fanSpeed);
+    setLabFanSpeedGauge(IDENTIFIER_FAN_CONTROLLER, fanSpeed);
   });
 
   iotServer.on("session-end", async (session) => {
@@ -70,6 +70,6 @@ export const registerPluginHomelab = (iotServer: IotServer) => {
       `${fanSpeed}`
     );
 
-    setLabFanSpeedGauge(IDENTIFIER_HOMELAB, fanSpeed);
+    setLabFanSpeedGauge(IDENTIFIER_FAN_CONTROLLER, fanSpeed);
   });
 };
